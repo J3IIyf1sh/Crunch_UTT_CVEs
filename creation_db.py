@@ -89,10 +89,12 @@ class CVE(Base):
     weaknesses = Column(Text)  # e.g., "NVD-CWE-Other"
     date_publication = Column(Date)
     date_mise_a_jour = Column(Date)
+    cisa_date = Column(Date)
     sources = Column(Text)  # JSON string or concatenated source info
     produit = Column(String)
     version_produit = Column(String)
     vendeur = Column(String)
+    cve_change_id = Column(String)
 
 
 class EquipementCVE(Base):
