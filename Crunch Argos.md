@@ -304,5 +304,3 @@ python3 double_requests.py
 ```python
 python3 affichage.py
 ```
-
-![[Capture d’écran 2025-05-23 à 11.13.27.png]]![[Capture d’écran 2025-05-23 à 11.14.22.png]]
