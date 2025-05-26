@@ -8,6 +8,8 @@ import urllib.parse
 import json
 import re
 import time
+from sqlalchemy import insert
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 API_KEY = "f2e1ddaa-ab13-422d-8a10-1366406cf474"
 headers = {"apiKey": API_KEY}
@@ -122,7 +124,7 @@ with engine.begin() as conn:
         cve_id = change.get("cveId")
         if not cve_id:
             continue
-        cve_change_id = change.get("cveChangeId")
+        cve_change_id = change.get("cveChangeId") or cve_id
         print(f"cve_change_id: {cve_change_id}")
         # Vérifier la date de dernière mise à jour dans la base
         db_result = conn.execute(text("""
@@ -181,7 +183,7 @@ with engine.begin() as conn:
 
         date_publication = cve_info.get("published")
         date_mise_a_jour = cve_info.get("lastModified")
-
+        
         sql_params = {
             "cve_id": cve_id,
             "description": description,
@@ -207,50 +209,17 @@ with engine.begin() as conn:
             "cve_change_id": cve_change_id
         }
 
-        if db_result:
-            print(f"{cve_id} mise à jour en base.")
-            conn.execute(text("""
-                UPDATE cves SET
-                    description = :description,
-                    base_score = :base_score,
-                    base_severity = :base_severity,
-                    impact_score = :impact_score,
-                    exploitability_score = :exploitability_score,
-                    vector_string = :vector_string,
-                    access_vector = :access_vector,
-                    access_complexity = :access_complexity,
-                    authentication = :authentication,
-                    confidentiality_impact = :confidentiality_impact,
-                    integrity_impact = :integrity_impact,
-                    availability_impact = :availability_impact,
-                    weaknesses = :weaknesses,
-                    date_publication = :date_publication,
-                    date_mise_a_jour = :date_mise_a_jour,
-                    sources = :sources,
-                    cisa_date = :cisa_date,
-                    produit = :produit,
-                    version_produit = :version_produit,
-                    vendeur = :vendeur,
-                    cve_change_id = :cve_change_id
-                WHERE cve_id = :cve_id
-            """), sql_params)
-        else:
-            print(f"{cve_id} inséré en base.")
-            conn.execute(text("""
-                INSERT INTO cves (
-                    cve_id, description, base_score, base_severity,
-                    impact_score, exploitability_score, vector_string,
-                    access_vector, access_complexity, authentication,
-                    confidentiality_impact, integrity_impact, availability_impact,
-                    weaknesses, date_publication, date_mise_a_jour, sources,
-                    cisa_date, produit, version_produit, vendeur, cve_change_id
-                ) VALUES (
-                    :cve_id, :description, :base_score, :base_severity,
-                    :impact_score, :exploitability_score, :vector_string,
-                    :access_vector, :access_complexity, :authentication,
-                    :confidentiality_impact, :integrity_impact, :availability_impact,
-                    :weaknesses, :date_publication, :date_mise_a_jour, :sources,
-                    :cisa_date, :produit, :version_produit, :vendeur, :cve_change_id
-                )
-            """), sql_params)
+        stmt = pg_insert(CVE.__table__).values(**sql_params)
+        # Sur conflit de cve_id, mettre à jour tous les champs
+        update_dict = {col: stmt.excluded[col] for col in sql_params.keys() if col != 'cve_id'}
+        stmt = stmt.on_conflict_do_update(
+            index_elements=['cve_id'],
+            set_=update_dict
+        )
+
+        # Exécution de l'UPSERT
+        result = conn.execute(stmt)
+        if result.rowcount == 1:
+            print(f"{cve_id} inséré ou mis à jour en base.")
+
     conn.commit()
