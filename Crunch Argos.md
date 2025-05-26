@@ -34,79 +34,94 @@ print("Connexion réussie à PostgreSQL !")
 _visualisation à https://dbdiagram.io/d_
 ![[Capture d’écran 2025-05-23 à 10.47.21.png]]
 ``` mysql
+CREATE TABLE contextes (
+    id SERIAL PRIMARY KEY,
+    secteur_activite VARCHAR,
+    nombre_salaries INTEGER,
+    nombre_clients INTEGER,
+    donnees_sensibles INTEGER,
+    localisation VARCHAR
+);
 
-Table clients {
-id serial [pk]
-nom_entreprise varchar
-description text
-responsable varchar
-email varchar
-telephone varchar
-risque varchar
-contexte_id int [ref: > contextes.id]
-}
-Table contextes {
-id serial [pk]
-secteur_activite varchar
-nombre_salaries int
-nombre_clients int
-donnees_sensibles int
-localisation varchar
-}
-Table inventaires {
-id serial [pk]
-client_id int [ref: > clients.id]
-equipement_id int [ref: > equipements.id]
-vlan boolean
-dmz boolean
-expose_internet boolean
-oob boolean
-position_reseau varchar
-note_position float
-}
-Table equipements {
-id serial [pk]
-marque varchar
-type varchar
-modele varchar
-version varchar
-description text
-firmware varchar
-}
-Table taches_equipement {
-id serial [pk]
-client_id int [ref: > clients.id]
-equipement_id int [ref: > equipements.id]
-description text
-responsable varchar
-lien_planning varchar
-statut varchar // en_cours, fini, etc.
-date_debut date
-date_fin date
-}
-Table cves {
-id serial [pk]
-cve_id varchar [unique]
-score_cve float
-resume text
-score_cvss float
-vecteur_cvss varchar
-date_publication date
-date_mise_a_jour date
-sources text
-cisa_date date
-produit varchar
-version_produit varchar
-vendeur varchar
-}
-Table equipement_cve {
-equipement_id int [ref: > equipements.id]
-cve_id int [ref: > cves.id]
-date_detection date
-critique boolean
-impact_description text
-primary key (equipement_id, cve_id)
-}
+CREATE TABLE clients (
+    id SERIAL PRIMARY KEY,
+    nom_entreprise VARCHAR,
+    description TEXT,
+    responsable VARCHAR,
+    email VARCHAR,
+    telephone VARCHAR,
+    risque_total VARCHAR,
+    contexte_id INTEGER REFERENCES contextes(id)
+);
+
+CREATE TABLE equipements (
+    id SERIAL PRIMARY KEY,
+    marque VARCHAR,
+    type VARCHAR,
+    modele VARCHAR,
+    version VARCHAR,
+    description TEXT,
+    firmware VARCHAR
+);
+
+CREATE TABLE inventaires (
+    id SERIAL PRIMARY KEY,
+    client_id INTEGER REFERENCES clients(id),
+    equipement_id INTEGER REFERENCES equipements(id),
+    vlan BOOLEAN,
+    dmz BOOLEAN,
+    expose_internet BOOLEAN,
+    oob BOOLEAN,
+    note_position FLOAT
+);
+
+CREATE TABLE taches_equipement (
+    id SERIAL PRIMARY KEY,
+    client_id INTEGER REFERENCES clients(id),
+    equipement_id INTEGER REFERENCES equipements(id),
+    description TEXT,
+    responsable VARCHAR,
+    lien_planning VARCHAR,
+    statut VARCHAR,
+    date_debut DATE,
+    date_fin DATE
+);
+
+CREATE TABLE cves (
+    id SERIAL PRIMARY KEY,
+    cve_id VARCHAR UNIQUE,
+    description TEXT,
+    base_score FLOAT,
+    base_severity VARCHAR,
+    impact_score FLOAT,
+    exploitability_score FLOAT,
+    vector_string VARCHAR,
+    access_vector VARCHAR,
+    access_complexity VARCHAR,
+    authentication VARCHAR,
+    confidentiality_impact VARCHAR,
+    integrity_impact VARCHAR,
+    availability_impact VARCHAR,
+    weaknesses TEXT,
+    date_publication DATE,
+    date_mise_a_jour DATE,
+    cisa_date DATE,
+    sources TEXT,
+    produit VARCHAR,
+    version_produit VARCHAR,
+    vendeur VARCHAR,
+    cve_change_id VARCHAR
+);
+
+CREATE TABLE equipement_cve (
+    equipement_id INTEGER REFERENCES equipements(id),
+    cve_id INTEGER REFERENCES cves(id),
+    date_detection DATE,
+    critique BOOLEAN,
+    impact_description TEXT,
+    PRIMARY KEY (equipement_id, cve_id)
+);
+
 ```
 --> on peut faire un script python pour créer cette base de données. 
 --> on peut faire un scrip python pour remplir cette base aléatoirement pour faire un test de fonctionnement lorsqu'il n'existe pas de vraies valeurs. 
