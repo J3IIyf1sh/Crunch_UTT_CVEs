@@ -18,7 +18,7 @@ Session = sessionmaker(bind=engine)
 session = Session()
 # Définir une période de 24h
 end_time = datetime.utcnow()
-start_time = end_time - timedelta(days=1)
+start_time = end_time - timedelta(days=3)
 # Format ISO-8601 avec timezone explicite
 tz = "+01:00"  # PAS encodé ici
 start_iso = start_time.strftime("%Y-%m-%dT%H:%M:%S.000") + tz
@@ -116,60 +116,55 @@ def extract_cisa_date(change):
     # Si l’API fournit pas directement, tu peux laisser None
     return None
 
-with engine.connect() as conn:
+with engine.begin() as conn:
     for item in data.get("cveChanges", []):
         change = item.get("change", {})
         cve_id = change.get("cveId")
         if not cve_id:
             continue
+        cve_change_id = change.get("cveChangeId")
+        print(f"cve_change_id: {cve_change_id}")
+        # Vérifier la date de dernière mise à jour dans la base
+        db_result = conn.execute(text("""
+            SELECT date_mise_a_jour FROM cves WHERE cve_change_id = :cve_change_id
+        """), {"cve_change_id": cve_change_id}).fetchone()
+        
+        
+        # Si présente et date identique => ne rien faire
+        if db_result:
+            print(f"{cve_id} déjà traité via ce cveChangeId ({cve_change_id}), on passe.")
+            continue
 
+        # Faire la requête complète pour cette CVE
         cve_url = f"https://services.nvd.nist.gov/rest/json/cves/2.0?cveId={cve_id}"
         print(f"Requête vers : {cve_url}")
 
         try:
-            cve_response = requests.get(cve_url,headers=headers, timeout=10)  # timeout de 10 secondes
+            cve_response = requests.get(cve_url, headers=headers, timeout=10)
             cve_response.raise_for_status()
             cve_data = cve_response.json()
         except requests.exceptions.RequestException as e:
             print(f"Erreur lors de la requête pour {cve_id} : {e}")
-            time.sleep(5)  # petit délai avant de continuer, pour ne pas surcharger ou enchaîner trop vite
+            time.sleep(5)
             continue
         except ValueError:
             print(f"Réponse JSON invalide pour {cve_id}")
             continue
-        print(cve_response.json())
-        
-        
 
-        if cve_response.status_code != 200:
-            print(f"Erreur en récupérant {cve_id} : {cve_response.status_code}")
-            continue
-
-        cve_data = cve_response.json()
         if "vulnerabilities" not in cve_data or not cve_data["vulnerabilities"]:
             print(f"Aucune donnée détaillée pour {cve_id}")
             continue
 
-        vuln = cve_data["vulnerabilities"][0]  # toujours 1 résultat pour un cveId
+        vuln = cve_data["vulnerabilities"][0]
         cve_info = vuln["cve"]
 
+        # Extraction des données
         description = extract_description(cve_info.get("descriptions", []))
-        print("description")
-        print(description)
         vector_string = extract_vector(cve_info.get("metrics", []))
         cvss_metrics = extract_cvss_metrics(cve_info.get("metrics", []))
-
-        weaknesses = []
-        for w in cve_info.get("weaknesses", []):
-            for d in w.get("description", []):
-                val = d.get("value")
-                if val:
-                    weaknesses.append(val)
-        
-
+        weaknesses = [d.get("value") for w in cve_info.get("weaknesses", []) for d in w.get("description", []) if d.get("value")]
         sources = [s.get("url") for s in cve_info.get("references", []) if s.get("url")]
 
-        # Prendre le premier produit CPE dispo (peut être raffiné)
         configurations = cve_info.get("configurations", [])
         vendeur = produit = version_produit = None
         for config in configurations:
@@ -185,7 +180,7 @@ with engine.connect() as conn:
             if vendeur: break
 
         date_publication = cve_info.get("published")
-        date_mise_a_jour = cve_info.get("lastModified", None)
+        date_mise_a_jour = cve_info.get("lastModified")
 
         sql_params = {
             "cve_id": cve_id,
@@ -209,15 +204,11 @@ with engine.connect() as conn:
             "produit": produit,
             "version_produit": version_produit,
             "vendeur": vendeur,
-            "source": change.get("sourceIdentifier")
+            "cve_change_id": cve_change_id
         }
 
-        result = conn.execute(
-            text("SELECT 1 FROM cves WHERE cve_id = :cve_id"),
-            {"cve_id": cve_id}
-        ).fetchone()
-
-        if result:
+        if db_result:
+            print(f"{cve_id} mise à jour en base.")
             conn.execute(text("""
                 UPDATE cves SET
                     description = :description,
@@ -239,10 +230,12 @@ with engine.connect() as conn:
                     cisa_date = :cisa_date,
                     produit = :produit,
                     version_produit = :version_produit,
-                    vendeur = :vendeur
+                    vendeur = :vendeur,
+                    cve_change_id = :cve_change_id
                 WHERE cve_id = :cve_id
             """), sql_params)
         else:
+            print(f"{cve_id} inséré en base.")
             conn.execute(text("""
                 INSERT INTO cves (
                     cve_id, description, base_score, base_severity,
@@ -250,15 +243,14 @@ with engine.connect() as conn:
                     access_vector, access_complexity, authentication,
                     confidentiality_impact, integrity_impact, availability_impact,
                     weaknesses, date_publication, date_mise_a_jour, sources,
-                    cisa_date, produit, version_produit, vendeur
+                    cisa_date, produit, version_produit, vendeur, cve_change_id
                 ) VALUES (
                     :cve_id, :description, :base_score, :base_severity,
                     :impact_score, :exploitability_score, :vector_string,
                     :access_vector, :access_complexity, :authentication,
                     :confidentiality_impact, :integrity_impact, :availability_impact,
                     :weaknesses, :date_publication, :date_mise_a_jour, :sources,
-                    :cisa_date, :produit, :version_produit, :vendeur
+                    :cisa_date, :produit, :version_produit, :vendeur, :cve_change_id
                 )
             """), sql_params)
-
     conn.commit()
